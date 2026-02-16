@@ -43,7 +43,6 @@ func NewShardedMap[K comparable, V any](shardCount int) *ShardedMap[K, V] {
 		shardCount: uint64(actualCount),
 	}
 
-	// Инициализируем шарды
 	for i := range sm.Shards {
 		sm.Shards[i] = &Shard[K, V]{
 			Data: make(map[K]V),
