@@ -87,12 +87,12 @@ func (sm *ShardedMap[K, V]) getShardIndex(key K) uint64 {
 // Использует RLock() для параллельных чтений без блокировки записей в других шардах.
 func (sm *ShardedMap[K, V]) Get(key K) (V, bool) {
 	idx := sm.getShardIndex(key)
-	Shard := sm.Shards[idx]
+	shard := sm.Shards[idx]
 
-	Shard.RLock()
-	defer Shard.RUnlock()
+	shard.RLock()
+	defer shard.RUnlock()
 
-	val, ok := Shard.Data[key]
+	val, ok := shard.Data[key]
 	return val, ok
 }
 
@@ -100,23 +100,23 @@ func (sm *ShardedMap[K, V]) Get(key K) (V, bool) {
 // Использует Lock() так как это операция записи.
 func (sm *ShardedMap[K, V]) Set(key K, value V) {
 	idx := sm.getShardIndex(key)
-	Shard := sm.Shards[idx]
+	shard := sm.Shards[idx]
 
-	Shard.Lock()
-	defer Shard.Unlock()
+	shard.Lock()
+	defer shard.Unlock()
 
-	Shard.Data[key] = value
+	shard.Data[key] = value
 }
 
 // Delete удаляет ключ из карты.
 func (sm *ShardedMap[K, V]) Delete(key K) {
 	idx := sm.getShardIndex(key)
-	Shard := sm.Shards[idx]
+	shard := sm.Shards[idx]
 
-	Shard.Lock()
-	defer Shard.Unlock()
+	shard.Lock()
+	defer shard.Unlock()
 
-	delete(Shard.Data, key)
+	delete(shard.Data, key)
 }
 
 // Keys возвращает слайс всех ключей в карте.
@@ -127,21 +127,21 @@ func (sm *ShardedMap[K, V]) Delete(key K) {
 func (sm *ShardedMap[K, V]) Keys() []K {
 	// Предварительно оцениваем размер, чтобы избежать множественных аллокаций
 	totalEstimated := 0
-	for _, Shard := range sm.Shards {
-		Shard.RLock()
-		totalEstimated += len(Shard.Data)
-		Shard.RUnlock()
+	for _, shard := range sm.Shards {
+		shard.RLock()
+		totalEstimated += len(shard.Data)
+		shard.RUnlock()
 	}
 
 	keys := make([]K, 0, totalEstimated)
 
 	// Собираем ключи из каждого шарда
-	for _, Shard := range sm.Shards {
-		Shard.RLock()
-		for k := range Shard.Data {
+	for _, shard := range sm.Shards {
+		shard.RLock()
+		for k := range shard.Data {
 			keys = append(keys, k)
 		}
-		Shard.RUnlock()
+		shard.RUnlock()
 	}
 
 	return keys
@@ -156,13 +156,13 @@ func (sm *ShardedMap[K, V]) Len() int {
 	var wg sync.WaitGroup
 	wg.Add(len(sm.Shards))
 
-	for _, Shard := range sm.Shards {
-		Shard := Shard // захватываем для замыкания
+	for _, shard := range sm.Shards {
+		shard := shard // захватываем для замыкания
 		go func() {
 			defer wg.Done()
-			Shard.RLock()
-			atomic.AddInt64(&total, int64(len(Shard.Data)))
-			Shard.RUnlock()
+			shard.RLock()
+			atomic.AddInt64(&total, int64(len(shard.Data)))
+			shard.RUnlock()
 		}()
 	}
 
@@ -173,21 +173,21 @@ func (sm *ShardedMap[K, V]) Len() int {
 // ForEach выполняет функцию для каждого элемента карты.
 // Функция вызывается с копией значения, чтобы избежать блокировок.
 func (sm *ShardedMap[K, V]) ForEach(fn func(K, V)) {
-	for _, Shard := range sm.Shards {
-		Shard.RLock()
+	for _, shard := range sm.Shards {
+		shard.RLock()
 		// Создаем копии пар ключ-значение, чтобы не держать блокировку во время вызова fn
 		pairs := make([]struct {
 			k K
 			v V
-		}, 0, len(Shard.Data))
+		}, 0, len(shard.Data))
 
-		for k, v := range Shard.Data {
+		for k, v := range shard.Data {
 			pairs = append(pairs, struct {
 				k K
 				v V
 			}{k, v})
 		}
-		Shard.RUnlock()
+		shard.RUnlock()
 
 		// Вызываем fn без блокировки
 		for _, p := range pairs {
@@ -200,16 +200,16 @@ func (sm *ShardedMap[K, V]) ForEach(fn func(K, V)) {
 // Это атомарная операция, полезная для счетчиков.
 func (sm *ShardedMap[K, V]) GetOrSet(key K, value V) (actual V, loaded bool) {
 	idx := sm.getShardIndex(key)
-	Shard := sm.Shards[idx]
+	shard := sm.Shards[idx]
 
-	Shard.Lock()
-	defer Shard.Unlock()
+	shard.Lock()
+	defer shard.Unlock()
 
-	if existing, ok := Shard.Data[key]; ok {
+	if existing, ok := shard.Data[key]; ok {
 		return existing, true
 	}
 
-	Shard.Data[key] = value
+	shard.Data[key] = value
 	return value, false
 }
 
@@ -217,12 +217,12 @@ func (sm *ShardedMap[K, V]) GetOrSet(key K, value V) (actual V, loaded bool) {
 // Полезно для rate limiter.
 func (sm *ShardedMap[K, V]) GetAndIncrement(key K) (old V, new V, ok bool) {
 	idx := sm.getShardIndex(key)
-	Shard := sm.Shards[idx]
+	shard := sm.Shards[idx]
 
-	Shard.Lock()
-	defer Shard.Unlock()
+	shard.Lock()
+	defer shard.Unlock()
 
-	val, exists := Shard.Data[key]
+	val, exists := shard.Data[key]
 	if !exists {
 		var zero V
 		return zero, zero, false
@@ -232,11 +232,11 @@ func (sm *ShardedMap[K, V]) GetAndIncrement(key K) (old V, new V, ok bool) {
 	switch v := any(val).(type) {
 	case int:
 		newVal := v + 1
-		Shard.Data[key] = any(newVal).(V)
+		shard.Data[key] = any(newVal).(V)
 		return val, any(newVal).(V), true
 	case int64:
 		newVal := v + 1
-		Shard.Data[key] = any(newVal).(V)
+		shard.Data[key] = any(newVal).(V)
 		return val, any(newVal).(V), true
 	default:
 		// Для нечисловых типов просто возвращаем ошибку
